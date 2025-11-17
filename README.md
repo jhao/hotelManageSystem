@@ -1,20 +1,16 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# 酒店管理系统（纯 JavaScript 版本）
 
-# Run and deploy your AI Studio app
+这是一个不依赖框架的酒店管理单页应用。所有数据都保存在浏览器 `localStorage` 中，适合用来演示房间状态、布草、资产等基础管理流程。
 
-This contains everything you need to run your app locally.
+## 功能概览
+- 登录后进入仪表盘，查看房间统计与快捷操作。
+- 房间支持入住、退房、指派打扫、标记维修/完成等流程。
+- 查看人员、房间、打扫任务、布草库存、资产及系统用户列表。
+- 系统页面可重置示例数据、导出当前数据或清空本地存储。
 
-View your app in AI Studio: https://ai.studio/apps/drive/1IXMaCRAR4nHlQkfPMTmNLHhNcAxG6gP9
+## 本地运行
+1. 安装依赖：`npm install`
+2. 启动开发服务器：`npm run dev`
+3. 浏览器访问输出的地址（默认 http://localhost:3000）。
 
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+构建静态文件可运行 `npm run build`，生成的 `dist` 目录可直接部署到任何静态托管环境。
