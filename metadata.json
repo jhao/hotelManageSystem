@@ -1,0 +1,5 @@
+{
+  "name": "Hotel Management System",
+  "description": "A comprehensive internal management system for hotels to track personnel, rooms, cleaning status, linen inventory, and assets. Features a visual dashboard for real-time monitoring and management.",
+  "requestFramePermissions": []
+}
