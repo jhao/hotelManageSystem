@@ -1,0 +1,550 @@
+const STORAGE_KEY = 'hotelAppData';
+const NAV_ITEMS = [
+  { id: 'dashboard', label: '仪表盘' },
+  { id: 'personnel', label: '人员管理' },
+  { id: 'rooms', label: '房间管理' },
+  { id: 'cleaning', label: '房间打扫' },
+  { id: 'linen', label: '布草管理' },
+  { id: 'assets', label: '资产管理' },
+  { id: 'users', label: '用户管理' },
+  { id: 'system', label: '系统管理' },
+];
+
+const ROOM_STATUS = {
+  available: { label: '可用', badge: 'badge--success' },
+  occupied: { label: '入住', badge: 'badge--info' },
+  cleaning: { label: '打扫中', badge: 'badge--warning' },
+  maintenance: { label: '维修中', badge: 'badge--danger' },
+};
+
+const state = {
+  data: loadData(),
+  currentUser: null,
+  activeView: 'dashboard',
+};
+
+function loadData() {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    try {
+      return JSON.parse(saved);
+    } catch (err) {
+      console.warn('无法解析保存的数据，使用示例数据', err);
+    }
+  }
+  return generateSampleData();
+}
+
+function saveData() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
+}
+
+function generateSampleData() {
+  const staff = [
+    { id: crypto.randomUUID(), name: '爱丽丝', role: '保洁' },
+    { id: crypto.randomUUID(), name: '鲍勃', role: '保洁' },
+    { id: crypto.randomUUID(), name: '查理', role: '前台' },
+    { id: crypto.randomUUID(), name: '戴安娜', role: '经理' },
+    { id: crypto.randomUUID(), name: '伊桑', role: '维修' },
+  ];
+
+  const rooms = [];
+  for (let floor = 1; floor <= 4; floor++) {
+    for (let num = 1; num <= 8; num++) {
+      rooms.push({
+        id: crypto.randomUUID(),
+        floor,
+        roomNumber: `${floor}0${num}`,
+        capacity: num % 3 === 0 ? 4 : 2,
+        status: 'available',
+        currentBookingId: null,
+        bookingHistory: [],
+      });
+    }
+  }
+
+  const linens = ['枕套', '床单', '被套', '浴巾', '毛巾'].flatMap((name) =>
+    Array.from({ length: 20 }, () => ({
+      id: crypto.randomUUID(),
+      name,
+      price: Math.floor(Math.random() * 20) + 10,
+      status: '库存',
+    })),
+  );
+
+  const assets = rooms.flatMap((room) => [
+    { name: '电视', category: '电子产品' },
+    { name: '床架', category: '家具' },
+    { name: '台灯', category: '家具' },
+    { name: '迷你冰箱', category: '电子产品' },
+  ].map((asset) => ({
+    id: crypto.randomUUID(),
+    name: asset.name,
+    category: asset.category,
+    location: `房间 ${room.roomNumber}`,
+    purchaseDate: new Date(Date.now() - Math.random() * 500 * 24 * 3600 * 1000)
+      .toISOString()
+      .slice(0, 10),
+    value: Math.floor(Math.random() * 600) + 200,
+  })));
+
+  const data = {
+    staff,
+    rooms,
+    guests: [],
+    bookings: [],
+    cleaningLogs: [],
+    linens,
+    linenCleaningLogs: [],
+    assets,
+    users: [
+      { id: 'user-admin', username: '管理员', role: '管理员' },
+      { id: 'user-standard', username: '普通用户', role: '普通用户' },
+    ],
+  };
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  return data;
+}
+
+function setView(view) {
+  state.activeView = view;
+  render();
+}
+
+function logout() {
+  state.currentUser = null;
+  render();
+}
+
+function updateRoom(roomId, updater) {
+  const index = state.data.rooms.findIndex((r) => r.id === roomId);
+  if (index === -1) return;
+  const updated = { ...state.data.rooms[index], ...updater(state.data.rooms[index]) };
+  state.data.rooms.splice(index, 1, updated);
+  saveData();
+  render();
+}
+
+function checkIn(room) {
+  const name = prompt('请输入住客姓名');
+  if (!name) return;
+  const idNumber = prompt('请输入证件号码');
+  if (!idNumber) return;
+  const phone = prompt('请输入联系电话（可选）') || '';
+
+  const guest = { id: crypto.randomUUID(), name, idNumber, phone };
+  const booking = { id: crypto.randomUUID(), guestId: guest.id, checkIn: new Date().toISOString(), checkOut: null };
+
+  state.data.guests.push(guest);
+  state.data.bookings.push(booking);
+  updateRoom(room.id, () => ({ status: 'occupied', currentBookingId: booking.id, bookingHistory: [...room.bookingHistory, booking.id] }));
+}
+
+function checkOut(room) {
+  if (!room.currentBookingId) return;
+  const confirmOut = confirm('确认要为该房间办理退房吗？');
+  if (!confirmOut) return;
+  state.data.bookings = state.data.bookings.map((booking) =>
+    booking.id === room.currentBookingId ? { ...booking, checkOut: new Date().toISOString() } : booking,
+  );
+  state.data.cleaningLogs.push({
+    id: crypto.randomUUID(),
+    roomId: room.id,
+    staffId: null,
+    assignedDate: new Date().toISOString(),
+    completedDate: null,
+  });
+  updateRoom(room.id, () => ({ status: 'cleaning', currentBookingId: null }));
+}
+
+function markClean(room) {
+  state.data.cleaningLogs = state.data.cleaningLogs.map((log) =>
+    log.roomId === room.id && !log.completedDate ? { ...log, completedDate: new Date().toISOString() } : log,
+  );
+  updateRoom(room.id, () => ({ status: 'available' }));
+}
+
+function toggleMaintenance(room) {
+  const next = room.status === 'maintenance' ? 'available' : 'maintenance';
+  updateRoom(room.id, () => ({ status: next }));
+}
+
+function assignCleaner(room) {
+  const cleaners = state.data.staff.filter((member) => member.role === '保洁');
+  const names = cleaners.map((c) => c.name).join(' / ');
+  const name = prompt(`请选择保洁员（输入姓名）：\n${names}`);
+  const staff = cleaners.find((c) => c.name === name);
+  if (!staff) return alert('未找到匹配的保洁员');
+  state.data.cleaningLogs.push({
+    id: crypto.randomUUID(),
+    roomId: room.id,
+    staffId: staff.id,
+    assignedDate: new Date().toISOString(),
+    completedDate: null,
+  });
+  updateRoom(room.id, () => ({ status: 'cleaning' }));
+}
+
+function resetData() {
+  state.data = generateSampleData();
+  render();
+}
+
+function exportData() {
+  const blob = new Blob([JSON.stringify(state.data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `hotel-data-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function createEl(tag, className, content) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (content !== undefined) el.innerHTML = content;
+  return el;
+}
+
+function renderNav() {
+  const nav = createEl('div', 'nav');
+  NAV_ITEMS.forEach((item) => {
+    const btn = createEl('button', `nav__item ${state.activeView === item.id ? 'nav__item--active' : ''}`);
+    btn.innerHTML = `<span>${item.label}</span>`;
+    btn.addEventListener('click', () => setView(item.id));
+    nav.appendChild(btn);
+  });
+  return nav;
+}
+
+function renderStatCard(title, value, badgeText, badgeClass) {
+  const card = createEl('div', 'stat-card');
+  card.innerHTML = `<div><h3>${title}</h3><strong>${value}</strong></div><span class="badge ${badgeClass}">${badgeText}</span>`;
+  return card;
+}
+
+function renderRoomsGrid(rooms) {
+  const grid = createEl('div', 'room-grid');
+  rooms.forEach((room) => {
+    const card = createEl('div', 'room-card');
+    const status = ROOM_STATUS[room.status];
+    const guest = room.currentBookingId
+      ? state.data.guests.find((g) => {
+          const booking = state.data.bookings.find((b) => b.id === room.currentBookingId);
+          return booking && booking.guestId === g.id;
+        })
+      : null;
+
+    const title = createEl('div', 'room-card__title');
+    title.innerHTML = `<span>房间 ${room.roomNumber}</span><span class="badge ${status.badge}">${status.label}</span>`;
+
+    const meta = createEl('div', 'muted');
+    meta.textContent = guest ? `当前住客：${guest.name}` : `可入住人数：${room.capacity} 人`;
+
+    const actions = createEl('div', 'room-card__actions');
+    if (room.status === 'available') {
+      const btn = createEl('button', 'btn btn--primary', '办理入住');
+      btn.addEventListener('click', () => checkIn(room));
+      actions.appendChild(btn);
+    }
+    if (room.status === 'occupied') {
+      const outBtn = createEl('button', 'btn btn--danger', '退房');
+      outBtn.addEventListener('click', () => checkOut(room));
+      const cleanBtn = createEl('button', 'btn btn--warning', '指派打扫');
+      cleanBtn.addEventListener('click', () => assignCleaner(room));
+      actions.append(outBtn, cleanBtn);
+    }
+    if (room.status === 'cleaning') {
+      const done = createEl('button', 'btn btn--success', '已打扫');
+      done.addEventListener('click', () => markClean(room));
+      actions.appendChild(done);
+    }
+    const maintenance = createEl('button', 'btn btn--outline', room.status === 'maintenance' ? '结束维修' : '维修中');
+    maintenance.addEventListener('click', () => toggleMaintenance(room));
+    actions.appendChild(maintenance);
+
+    card.append(title, meta, actions);
+    grid.appendChild(card);
+  });
+  return grid;
+}
+
+function renderDashboard() {
+  const container = createEl('div', 'grid', '');
+  container.classList.add('grid--stats');
+  const totalRooms = state.data.rooms.length;
+  const available = state.data.rooms.filter((r) => r.status === 'available').length;
+  const occupied = state.data.rooms.filter((r) => r.status === 'occupied').length;
+  const cleaning = state.data.rooms.filter((r) => r.status === 'cleaning').length;
+  const maintenance = state.data.rooms.filter((r) => r.status === 'maintenance').length;
+
+  const stats = createEl('div', 'grid grid--stats');
+  stats.append(
+    renderStatCard('房间总数', totalRooms, '全部', 'badge--info'),
+    renderStatCard('可用房间', available, '可接待', 'badge--success'),
+    renderStatCard('入住中', occupied, '处理中', 'badge--info'),
+    renderStatCard('维修/打扫', cleaning + maintenance, '关注', 'badge--warning'),
+  );
+
+  const roomsCard = createEl('div', 'card');
+  roomsCard.append(createEl('h3', 'section-title', '房间概览'), renderRoomsGrid(state.data.rooms.slice(0, 12)));
+
+  const overview = createEl('div', 'card');
+  overview.append(createEl('h3', 'section-title', '运行情况'));
+  const list = createEl('div', 'grid');
+  list.style.gridTemplateColumns = 'repeat(auto-fit, minmax(260px, 1fr))';
+  list.append(
+    createEl('div', '', `<strong>${state.data.staff.length}</strong><div class="muted">在职员工</div>`),
+    createEl('div', '', `<strong>${state.data.assets.length}</strong><div class="muted">资产记录</div>`),
+    createEl('div', '', `<strong>${state.data.linens.length}</strong><div class="muted">布草件数</div>`),
+    createEl('div', '', `<strong>${state.data.bookings.length}</strong><div class="muted">历史订单</div>`),
+  );
+  overview.appendChild(list);
+
+  const wrapper = createEl('div', 'grid');
+  wrapper.append(stats, roomsCard, overview);
+  return wrapper;
+}
+
+function renderPersonnel() {
+  const card = createEl('div', 'card');
+  card.append(createEl('h3', 'section-title', '员工名录'));
+  const table = createEl('table', 'table');
+  table.innerHTML = `<thead><tr><th>姓名</th><th>岗位</th><th>负责楼层</th></tr></thead>`;
+  const body = createEl('tbody');
+  state.data.staff.forEach((member, index) => {
+    const tr = createEl('tr');
+    tr.innerHTML = `<td>${member.name}</td><td>${member.role}</td><td>${(index % 4) + 1} 层</td>`;
+    body.appendChild(tr);
+  });
+  table.appendChild(body);
+  card.appendChild(table);
+  return card;
+}
+
+function renderRooms() {
+  const card = createEl('div', 'card');
+  card.append(createEl('h3', 'section-title', '房间列表'));
+  const table = createEl('table', 'table');
+  table.innerHTML = `<thead><tr><th>房间号</th><th>状态</th><th>容量</th><th>入住人</th></tr></thead>`;
+  const body = createEl('tbody');
+  state.data.rooms.forEach((room) => {
+    const status = ROOM_STATUS[room.status];
+    const booking = room.currentBookingId ? state.data.bookings.find((b) => b.id === room.currentBookingId) : null;
+    const guest = booking ? state.data.guests.find((g) => g.id === booking.guestId) : null;
+    const tr = createEl('tr');
+    tr.innerHTML = `<td>${room.roomNumber}</td><td><span class="badge ${status.badge}">${status.label}</span></td><td>${room.capacity} 人</td><td>${guest ? guest.name : '<span class="muted">暂无</span>'}</td>`;
+    body.appendChild(tr);
+  });
+  table.appendChild(body);
+  card.appendChild(table);
+  card.append(createEl('div', 'muted', '在列表中点击侧边仪表盘可以快速对房间进行入住、退房、打扫等操作。'));
+  return card;
+}
+
+function renderCleaning() {
+  const container = createEl('div', 'grid');
+  container.style.gap = '14px';
+
+  const activeLogs = state.data.cleaningLogs.filter((log) => !log.completedDate);
+  const finished = state.data.cleaningLogs.filter((log) => log.completedDate);
+
+  const makeList = (title, logs) => {
+    const card = createEl('div', 'card');
+    card.append(createEl('h3', 'section-title', title));
+    if (!logs.length) {
+      card.append(createEl('p', 'muted', '暂无记录'));
+      return card;
+    }
+    const list = createEl('div', 'grid');
+    list.style.gridTemplateColumns = 'repeat(auto-fit, minmax(260px, 1fr))';
+    logs.forEach((log) => {
+      const room = state.data.rooms.find((r) => r.id === log.roomId);
+      const staff = log.staffId ? state.data.staff.find((s) => s.id === log.staffId) : null;
+      const box = createEl('div', 'room-card');
+      box.style.borderLeftColor = '#f59e0b';
+      box.innerHTML = `<div class="room-card__title"><span>${room ? `房间 ${room.roomNumber}` : '未知房间'}</span><span class="badge ${log.completedDate ? 'badge--success' : 'badge--warning'}">${log.completedDate ? '完成' : '进行中'}</span></div>`;
+      box.appendChild(createEl('div', 'muted', `${staff ? staff.name : '待指派'} · ${new Date(log.assignedDate).toLocaleString()}`));
+      if (!log.completedDate) {
+        const btn = createEl('button', 'btn btn--success', '标记完成');
+        btn.addEventListener('click', () => {
+          log.completedDate = new Date().toISOString();
+          const roomData = state.data.rooms.find((r) => r.id === log.roomId);
+          if (roomData) roomData.status = 'available';
+          saveData();
+          render();
+        });
+        box.appendChild(btn);
+      }
+      list.appendChild(box);
+    });
+    card.appendChild(list);
+    return card;
+  };
+
+  container.append(makeList('待完成的打扫任务', activeLogs), makeList('历史打扫记录', finished.slice(-6)));
+  return container;
+}
+
+function renderLinen() {
+  const card = createEl('div', 'card');
+  card.append(createEl('h3', 'section-title', '布草库存'));
+  const total = state.data.linens.length;
+  const inUse = state.data.linens.filter((l) => l.status === '使用中').length;
+  const washing = state.data.linens.filter((l) => l.status === '清洗中').length;
+  const stock = total - inUse - washing;
+
+  const stats = createEl('div', 'grid grid--stats');
+  stats.append(
+    renderStatCard('总件数', total, '布草', 'badge--info'),
+    renderStatCard('库存', stock, '可用', 'badge--success'),
+    renderStatCard('使用中', inUse, '客房', 'badge--warning'),
+    renderStatCard('清洗中', washing, '后勤', 'badge--danger'),
+  );
+
+  const chips = createEl('div', 'chip-list');
+  const sample = state.data.linens.slice(0, 12);
+  sample.forEach((linen) => chips.appendChild(createEl('span', 'chip', `${linen.name} · ￥${linen.price}`)));
+
+  card.append(stats, createEl('p', 'muted', '随机展示的布草价格有助于快速估算库存成本。'), chips);
+  return card;
+}
+
+function renderAssets() {
+  const card = createEl('div', 'card');
+  card.append(createEl('h3', 'section-title', '资产清单'));
+  const table = createEl('table', 'table');
+  table.innerHTML = `<thead><tr><th>名称</th><th>类别</th><th>位置</th><th>购入日期</th><th>估值</th></tr></thead>`;
+  const body = createEl('tbody');
+  state.data.assets.slice(0, 30).forEach((asset) => {
+    const tr = createEl('tr');
+    tr.innerHTML = `<td>${asset.name}</td><td>${asset.category}</td><td>${asset.location}</td><td>${asset.purchaseDate}</td><td>￥${asset.value}</td>`;
+    body.appendChild(tr);
+  });
+  table.appendChild(body);
+  card.append(table, createEl('p', 'muted', '列表显示最近的 30 条资产记录。'));
+  return card;
+}
+
+function renderUsers() {
+  const card = createEl('div', 'card');
+  card.append(createEl('h3', 'section-title', '系统用户'));
+  const list = createEl('div', 'grid');
+  list.style.gridTemplateColumns = 'repeat(auto-fit, minmax(220px, 1fr))';
+  state.data.users.forEach((user) => {
+    const box = createEl('div', 'room-card');
+    box.style.borderLeftColor = user.role === '管理员' ? '#4f46e5' : '#0ea5e9';
+    box.innerHTML = `<div class="room-card__title"><span>${user.username}</span><span class="badge ${user.role === '管理员' ? 'badge--danger' : 'badge--info'}">${user.role}</span></div>`;
+    box.appendChild(createEl('div', 'muted', '示例账号，不需要密码即可登录。'));
+    list.appendChild(box);
+  });
+  card.appendChild(list);
+  return card;
+}
+
+function renderSystem() {
+  const card = createEl('div', 'card');
+  card.append(createEl('h3', 'section-title', '系统维护')); 
+  const row = createEl('div', 'actions-row');
+  const resetBtn = createEl('button', 'btn btn--primary', '重置示例数据');
+  const exportBtn = createEl('button', 'btn btn--outline', '导出当前数据');
+  const clearBtn = createEl('button', 'btn btn--danger', '清空数据');
+  resetBtn.addEventListener('click', resetData);
+  exportBtn.addEventListener('click', exportData);
+  clearBtn.addEventListener('click', () => {
+    localStorage.removeItem(STORAGE_KEY);
+    state.data = generateSampleData();
+    render();
+  });
+  row.append(resetBtn, exportBtn, clearBtn);
+  card.append(row, createEl('p', 'muted', '所有数据都存储在浏览器本地，无需后端服务。'));
+  return card;
+}
+
+function renderContent() {
+  switch (state.activeView) {
+    case 'dashboard':
+      return renderDashboard();
+    case 'personnel':
+      return renderPersonnel();
+    case 'rooms':
+      return renderRooms();
+    case 'cleaning':
+      return renderCleaning();
+    case 'linen':
+      return renderLinen();
+    case 'assets':
+      return renderAssets();
+    case 'users':
+      return renderUsers();
+    case 'system':
+      return renderSystem();
+    default:
+      return createEl('div', '', '未知视图');
+  }
+}
+
+function renderAppShell() {
+  const shell = createEl('div', 'app-shell');
+  const sidebar = createEl('aside', 'sidebar');
+  const brand = createEl('div', 'sidebar__brand');
+  brand.innerHTML = `<div class="logo">H</div><div><div>酒店管理系统</div><small style="color:#9ca3af">Vanilla JS 版本</small></div>`;
+  sidebar.append(brand, renderNav());
+
+  const userCard = createEl('div', 'user-card');
+  userCard.innerHTML = `<strong>${state.currentUser.username}</strong><span class="muted">${state.currentUser.role}</span>`;
+  const logoutBtn = createEl('button', 'logout-btn', '退出登录');
+  logoutBtn.addEventListener('click', logout);
+  userCard.appendChild(logoutBtn);
+  sidebar.appendChild(userCard);
+
+  const main = createEl('div', 'main');
+  const header = createEl('div', 'main__header');
+  header.append(createEl('div', '', `<h2 style="margin:0">${NAV_ITEMS.find((i) => i.id === state.activeView)?.label || ''}</h2>`), createEl('span', 'tag', '纯 JavaScript 体验'));
+
+  const content = createEl('div', 'content');
+  content.appendChild(renderContent());
+
+  main.append(header, content);
+  shell.append(sidebar, main);
+  return shell;
+}
+
+function renderLogin() {
+  const container = createEl('div', 'login');
+  const panel = createEl('div', 'login__panel');
+  panel.innerHTML = `<div class="logo" style="margin-bottom:8px">H</div><h1>酒店管理系统</h1><p class="muted">选择一个示例账号即可进入系统，完全由浏览器本地驱动。</p>`;
+
+  const select = createEl('select', 'select');
+  state.data.users.forEach((user) => {
+    const option = createEl('option');
+    option.value = user.id;
+    option.textContent = `${user.username}（${user.role}）`;
+    select.appendChild(option);
+  });
+
+  const loginBtn = createEl('button', 'btn btn--primary', '立即登录');
+  loginBtn.style.width = '100%';
+  loginBtn.style.marginTop = '12px';
+  loginBtn.addEventListener('click', () => {
+    const user = state.data.users.find((u) => u.id === select.value);
+    if (user) {
+      state.currentUser = user;
+      render();
+    }
+  });
+
+  panel.append(select, loginBtn);
+  container.appendChild(panel);
+  return container;
+}
+
+function render() {
+  const root = document.getElementById('app');
+  root.innerHTML = '';
+  root.appendChild(state.currentUser ? renderAppShell() : renderLogin());
+}
+
+render();
