@@ -129,18 +129,35 @@ function updateRoom(roomId, updater) {
 }
 
 function checkIn(room) {
-  const name = prompt('请输入住客姓名');
-  if (!name) return;
-  const idNumber = prompt('请输入证件号码');
-  if (!idNumber) return;
-  const phone = prompt('请输入联系电话（可选）') || '';
+  openFormModal({
+    title: `办理入住 - 房间 ${room.roomNumber}`,
+    submitText: '确认入住',
+    fields: [
+      { name: 'name', label: '住客姓名', value: '', placeholder: '请输入住客姓名', required: true },
+      { name: 'idNumber', label: '证件号码', value: '', placeholder: '请输入证件号', required: true },
+      { name: 'phone', label: '联系电话', value: '', placeholder: '可选', required: false },
+    ],
+    onSubmit: ({ name, idNumber, phone }, close) => {
+      if (!name || !idNumber) return alert('请填写必填信息');
+      const guest = { id: crypto.randomUUID(), name, idNumber, phone: phone || '' };
+      const booking = {
+        id: crypto.randomUUID(),
+        guestId: guest.id,
+        roomId: room.id,
+        checkIn: new Date().toISOString(),
+        checkOut: null,
+      };
 
-  const guest = { id: crypto.randomUUID(), name, idNumber, phone };
-  const booking = { id: crypto.randomUUID(), guestId: guest.id, roomId: room.id, checkIn: new Date().toISOString(), checkOut: null };
-
-  state.data.guests.push(guest);
-  state.data.bookings.push(booking);
-  updateRoom(room.id, () => ({ status: 'occupied', currentBookingId: booking.id, bookingHistory: [...room.bookingHistory, booking.id] }));
+      state.data.guests.push(guest);
+      state.data.bookings.push(booking);
+      updateRoom(room.id, () => ({
+        status: 'occupied',
+        currentBookingId: booking.id,
+        bookingHistory: [...room.bookingHistory, booking.id],
+      }));
+      close();
+    },
+  });
 }
 
 function checkOut(room) {
@@ -174,18 +191,35 @@ function toggleMaintenance(room) {
 
 function assignCleaner(room) {
   const cleaners = state.data.staff.filter((member) => member.role === '保洁');
-  const names = cleaners.map((c) => c.name).join(' / ');
-  const name = prompt(`请选择保洁员（输入姓名）：\n${names}`);
-  const staff = cleaners.find((c) => c.name === name);
-  if (!staff) return alert('未找到匹配的保洁员');
-  state.data.cleaningLogs.push({
-    id: crypto.randomUUID(),
-    roomId: room.id,
-    staffId: staff.id,
-    assignedDate: new Date().toISOString(),
-    completedDate: null,
+  if (!cleaners.length) return alert('当前没有可用的保洁人员');
+
+  openFormModal({
+    title: `指派保洁 - 房间 ${room.roomNumber}`,
+    submitText: '指派',
+    fields: [
+      {
+        name: 'staffId',
+        label: '选择保洁员',
+        type: 'select',
+        options: cleaners.map((c) => ({ value: c.id, label: `${c.name}（${c.role}）` })),
+        value: cleaners[0].id,
+        required: true,
+      },
+    ],
+    onSubmit: ({ staffId }, close) => {
+      const staff = cleaners.find((c) => c.id === staffId);
+      if (!staff) return alert('未找到匹配的保洁员');
+      state.data.cleaningLogs.push({
+        id: crypto.randomUUID(),
+        roomId: room.id,
+        staffId: staff.id,
+        assignedDate: new Date().toISOString(),
+        completedDate: null,
+      });
+      updateRoom(room.id, () => ({ status: 'cleaning' }));
+      close();
+    },
   });
-  updateRoom(room.id, () => ({ status: 'cleaning' }));
 }
 
 function resetData() {
@@ -226,6 +260,84 @@ function createEl(tag, className, content) {
   if (className) el.className = className;
   if (content !== undefined) el.innerHTML = content;
   return el;
+}
+
+function openFormModal({ title, fields, submitText = '保存', onSubmit }) {
+  const overlay = createEl('div', 'modal-overlay');
+  const modal = createEl('div', 'modal');
+
+  const header = createEl('div', 'modal__header');
+  header.innerHTML = `<h3>${title}</h3>`;
+  const closeBtn = createEl('button', 'modal__close', '&times;');
+  closeBtn.addEventListener('click', close);
+  header.appendChild(closeBtn);
+
+  const form = createEl('form', 'modal__form');
+  fields.forEach((field) => {
+    const wrapper = createEl('label', 'modal__field');
+    wrapper.appendChild(createEl('span', 'modal__label', field.label));
+
+    let input;
+    if (field.type === 'select') {
+      input = createEl('select', 'input');
+      field.options.forEach((option) => {
+        const opt = createEl('option');
+        opt.value = option.value;
+        opt.textContent = option.label;
+        input.appendChild(opt);
+      });
+      input.value = field.value ?? field.options?.[0]?.value ?? '';
+    } else {
+      input = createEl('input', 'input');
+      input.type = field.type || 'text';
+      if (field.placeholder) input.placeholder = field.placeholder;
+      if (field.min !== undefined) input.min = field.min;
+      input.value = field.value ?? '';
+    }
+
+    input.name = field.name;
+    if (field.required) input.required = true;
+
+    wrapper.appendChild(input);
+    form.appendChild(wrapper);
+  });
+
+  const actions = createEl('div', 'modal__actions');
+  const cancel = createEl('button', 'btn btn--outline', '取消');
+  cancel.type = 'button';
+  cancel.addEventListener('click', close);
+  const submit = createEl('button', 'btn btn--primary', submitText);
+  submit.type = 'submit';
+  actions.append(cancel, submit);
+  form.appendChild(actions);
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const formData = new FormData(form);
+    const values = {};
+    fields.forEach((field) => {
+      let value = formData.get(field.name);
+      if (field.type === 'number') value = Number(value);
+      values[field.name] = value;
+    });
+    onSubmit(values, close);
+  });
+
+  modal.append(header, form);
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) close();
+  });
+
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('show'));
+
+  function close() {
+    overlay.classList.remove('show');
+    setTimeout(() => overlay.remove(), 150);
+  }
+
+  return { close };
 }
 
 function renderNav() {
@@ -360,13 +472,20 @@ function renderPersonnel() {
     const actions = createEl('div', 'table-actions');
     const edit = createEl('button', 'btn btn--outline', '编辑');
     edit.addEventListener('click', () => {
-      const name = prompt('更新姓名', member.name);
-      if (!name) return;
-      const role = prompt('更新岗位', member.role);
-      if (!role) return;
-      state.data.staff[index] = { ...member, name, role };
-      saveData();
-      render();
+      openFormModal({
+        title: '编辑员工',
+        fields: [
+          { name: 'name', label: '姓名', value: member.name, required: true },
+          { name: 'role', label: '岗位', value: member.role, required: true },
+        ],
+        onSubmit: ({ name, role }, close) => {
+          if (!name || !role) return;
+          state.data.staff[index] = { ...member, name, role };
+          saveData();
+          render();
+          close();
+        },
+      });
     });
     const del = createEl('button', 'btn btn--danger', '删除');
     del.addEventListener('click', () => {
@@ -439,13 +558,21 @@ function renderRooms() {
 
     const edit = createEl('button', 'btn btn--outline', '编辑');
     edit.addEventListener('click', () => {
-      const roomNumber = prompt('房间号', room.roomNumber);
-      if (!roomNumber) return;
-      const floor = Number(prompt('楼层', room.floor) || room.floor);
-      const capacity = Number(prompt('容量', room.capacity) || room.capacity);
-      state.data.rooms[index] = { ...room, roomNumber, floor, capacity };
-      saveData();
-      render();
+      openFormModal({
+        title: '编辑房间',
+        fields: [
+          { name: 'roomNumber', label: '房间号', value: room.roomNumber, required: true },
+          { name: 'floor', label: '楼层', type: 'number', value: room.floor, min: 1, required: true },
+          { name: 'capacity', label: '容量', type: 'number', value: room.capacity, min: 1, required: true },
+        ],
+        onSubmit: ({ roomNumber, floor, capacity }, close) => {
+          if (!roomNumber) return;
+          state.data.rooms[index] = { ...room, roomNumber, floor: Number(floor) || room.floor, capacity: Number(capacity) || room.capacity };
+          saveData();
+          render();
+          close();
+        },
+      });
     });
 
     const del = createEl('button', 'btn btn--danger', '删除');
@@ -626,13 +753,31 @@ function renderLinen() {
     const actions = createEl('div', 'table-actions');
     const edit = createEl('button', 'btn btn--outline', '编辑');
     edit.addEventListener('click', () => {
-      const name = prompt('名称', item.name);
-      if (!name) return;
-      const price = Number(prompt('单价', item.price) || item.price);
-      const status = prompt('状态（库存/使用中/清洗中）', item.status) || item.status;
-      state.data.linens[index] = { ...item, name, price, status };
-      saveData();
-      render();
+      openFormModal({
+        title: '编辑布草',
+        fields: [
+          { name: 'name', label: '名称', value: item.name, required: true },
+          { name: 'price', label: '单价', type: 'number', value: item.price, min: 0, required: true },
+          {
+            name: 'status',
+            label: '状态',
+            type: 'select',
+            value: item.status,
+            options: [
+              { value: '库存', label: '库存' },
+              { value: '使用中', label: '使用中' },
+              { value: '清洗中', label: '清洗中' },
+            ],
+          },
+        ],
+        onSubmit: ({ name, price, status }, close) => {
+          if (!name) return;
+          state.data.linens[index] = { ...item, name, price: Number(price) || 0, status };
+          saveData();
+          render();
+          close();
+        },
+      });
     });
     const del = createEl('button', 'btn btn--danger', '删除');
     del.addEventListener('click', () => {
@@ -706,15 +851,30 @@ function renderAssets() {
     const actions = createEl('div', 'table-actions');
     const edit = createEl('button', 'btn btn--outline', '编辑');
     edit.addEventListener('click', () => {
-      const name = prompt('名称', asset.name);
-      if (!name) return;
-      const category = prompt('类别', asset.category) || asset.category;
-      const location = prompt('位置', asset.location) || asset.location;
-      const purchaseDate = prompt('购入日期', asset.purchaseDate) || asset.purchaseDate;
-      const value = Number(prompt('估值', asset.value) || asset.value);
-      state.data.assets[index] = { ...asset, name, category, location, purchaseDate, value };
-      saveData();
-      render();
+      openFormModal({
+        title: '编辑资产',
+        fields: [
+          { name: 'name', label: '名称', value: asset.name, required: true },
+          { name: 'category', label: '类别', value: asset.category, required: true },
+          { name: 'location', label: '位置', value: asset.location, required: true },
+          { name: 'purchaseDate', label: '购入日期', type: 'date', value: asset.purchaseDate, required: true },
+          { name: 'value', label: '估值', type: 'number', value: asset.value, min: 0, required: true },
+        ],
+        onSubmit: ({ name, category, location, purchaseDate, value }, close) => {
+          if (!name) return;
+          state.data.assets[index] = {
+            ...asset,
+            name,
+            category,
+            location,
+            purchaseDate,
+            value: Number(value) || 0,
+          };
+          saveData();
+          render();
+          close();
+        },
+      });
     });
     const del = createEl('button', 'btn btn--danger', '删除');
     del.addEventListener('click', () => {
@@ -773,15 +933,32 @@ function renderUsers() {
     const actions = createEl('div', 'room-card__actions');
     const edit = createEl('button', 'btn btn--outline', '编辑');
     edit.addEventListener('click', () => {
-      const username = prompt('用户名', user.username);
-      if (!username) return;
-      const role = prompt('角色（管理员/普通用户）', user.role) || user.role;
-      state.data.users[index] = { ...user, username, role };
-      if (state.currentUser && state.currentUser.id === user.id) {
-        state.currentUser = state.data.users[index];
-      }
-      saveData();
-      render();
+      openFormModal({
+        title: '编辑用户',
+        fields: [
+          { name: 'username', label: '用户名', value: user.username, required: true },
+          {
+            name: 'role',
+            label: '角色',
+            type: 'select',
+            value: user.role,
+            options: [
+              { value: '管理员', label: '管理员' },
+              { value: '普通用户', label: '普通用户' },
+            ],
+          },
+        ],
+        onSubmit: ({ username, role }, close) => {
+          if (!username) return;
+          state.data.users[index] = { ...user, username, role };
+          if (state.currentUser && state.currentUser.id === user.id) {
+            state.currentUser = state.data.users[index];
+          }
+          saveData();
+          render();
+          close();
+        },
+      });
     });
 
     const del = createEl('button', 'btn btn--danger', '删除');
@@ -847,7 +1024,7 @@ function renderAppShell() {
   const shell = createEl('div', 'app-shell');
   const sidebar = createEl('aside', 'sidebar');
   const brand = createEl('div', 'sidebar__brand');
-  brand.innerHTML = `<div class="logo">H</div><div><div>酒店管理系统</div><small style="color:#9ca3af">Vanilla JS 版本</small></div>`;
+  brand.innerHTML = `<div class="logo">H</div><div><div>酒店管理系统</div></div>`;
   sidebar.append(brand, renderNav());
 
   const userCard = createEl('div', 'user-card');
@@ -859,7 +1036,7 @@ function renderAppShell() {
 
   const main = createEl('div', 'main');
   const header = createEl('div', 'main__header');
-  header.append(createEl('div', '', `<h2 style="margin:0">${NAV_ITEMS.find((i) => i.id === state.activeView)?.label || ''}</h2>`), createEl('span', 'tag', '纯 JavaScript 体验'));
+  header.append(createEl('div', '', `<h2 style="margin:0">${NAV_ITEMS.find((i) => i.id === state.activeView)?.label || ''}</h2>`));
 
   const content = createEl('div', 'content');
   content.appendChild(renderContent());
