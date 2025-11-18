@@ -1,4 +1,6 @@
 const STORAGE_KEY = 'hotelAppData';
+const LOGIN_PASSWORD = 'h123';
+
 const NAV_ITEMS = [
   { id: 'dashboard', label: '仪表盘' },
   { id: 'personnel', label: '人员管理' },
@@ -134,7 +136,7 @@ function checkIn(room) {
   const phone = prompt('请输入联系电话（可选）') || '';
 
   const guest = { id: crypto.randomUUID(), name, idNumber, phone };
-  const booking = { id: crypto.randomUUID(), guestId: guest.id, checkIn: new Date().toISOString(), checkOut: null };
+  const booking = { id: crypto.randomUUID(), guestId: guest.id, roomId: room.id, checkIn: new Date().toISOString(), checkOut: null };
 
   state.data.guests.push(guest);
   state.data.bookings.push(booking);
@@ -188,7 +190,25 @@ function assignCleaner(room) {
 
 function resetData() {
   state.data = generateSampleData();
+  alert('示例数据重置成功');
   render();
+}
+
+function clearBusinessData() {
+  state.data = {
+    ...state.data,
+    staff: [],
+    rooms: [],
+    guests: [],
+    bookings: [],
+    cleaningLogs: [],
+    linens: [],
+    linenCleaningLogs: [],
+    assets: [],
+  };
+  saveData();
+  render();
+  alert('业务数据已清空，用户数据保留。');
 }
 
 function exportData() {
@@ -311,42 +331,201 @@ function renderDashboard() {
 function renderPersonnel() {
   const card = createEl('div', 'card');
   card.append(createEl('h3', 'section-title', '员工名录'));
+
+  const form = createEl('form', 'form-grid');
+  form.innerHTML = `
+    <div>
+      <label class="muted">姓名</label>
+      <input required class="input" placeholder="例如：张三" />
+    </div>
+    <div>
+      <label class="muted">岗位</label>
+      <input required class="input" placeholder="例如：保洁 / 前台" />
+    </div>
+    <button class="btn btn--primary" type="submit">新增员工</button>
+  `;
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const [nameInput, roleInput] = form.querySelectorAll('input');
+    state.data.staff.push({ id: crypto.randomUUID(), name: nameInput.value.trim(), role: roleInput.value.trim() });
+    saveData();
+    render();
+  });
+
   const table = createEl('table', 'table');
-  table.innerHTML = `<thead><tr><th>姓名</th><th>岗位</th><th>负责楼层</th></tr></thead>`;
+  table.innerHTML = `<thead><tr><th>姓名</th><th>岗位</th><th>负责楼层</th><th>操作</th></tr></thead>`;
   const body = createEl('tbody');
   state.data.staff.forEach((member, index) => {
     const tr = createEl('tr');
+    const actions = createEl('div', 'table-actions');
+    const edit = createEl('button', 'btn btn--outline', '编辑');
+    edit.addEventListener('click', () => {
+      const name = prompt('更新姓名', member.name);
+      if (!name) return;
+      const role = prompt('更新岗位', member.role);
+      if (!role) return;
+      state.data.staff[index] = { ...member, name, role };
+      saveData();
+      render();
+    });
+    const del = createEl('button', 'btn btn--danger', '删除');
+    del.addEventListener('click', () => {
+      if (!confirm('确认删除该员工？')) return;
+      state.data.staff.splice(index, 1);
+      state.data.cleaningLogs = state.data.cleaningLogs.map((log) =>
+        log.staffId === member.id ? { ...log, staffId: null } : log,
+      );
+      saveData();
+      render();
+    });
+    actions.append(edit, del);
     tr.innerHTML = `<td>${member.name}</td><td>${member.role}</td><td>${(index % 4) + 1} 层</td>`;
+    const actionTd = createEl('td');
+    actionTd.appendChild(actions);
+    tr.appendChild(actionTd);
     body.appendChild(tr);
   });
   table.appendChild(body);
-  card.appendChild(table);
+  card.append(form, table);
   return card;
 }
 
 function renderRooms() {
   const card = createEl('div', 'card');
   card.append(createEl('h3', 'section-title', '房间列表'));
+
+  const form = createEl('form', 'form-grid');
+  form.innerHTML = `
+    <div>
+      <label class="muted">房间号</label>
+      <input required class="input" placeholder="例如：302" />
+    </div>
+    <div>
+      <label class="muted">楼层</label>
+      <input required type="number" min="1" class="input" placeholder="3" />
+    </div>
+    <div>
+      <label class="muted">容量（人数）</label>
+      <input required type="number" min="1" class="input" value="2" />
+    </div>
+    <button class="btn btn--primary" type="submit">新增房间</button>
+  `;
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const [roomInput, floorInput, capacityInput] = form.querySelectorAll('input');
+    state.data.rooms.push({
+      id: crypto.randomUUID(),
+      floor: Number(floorInput.value || 1),
+      roomNumber: roomInput.value.trim(),
+      capacity: Number(capacityInput.value || 1),
+      status: 'available',
+      currentBookingId: null,
+      bookingHistory: [],
+    });
+    saveData();
+    render();
+  });
+
   const table = createEl('table', 'table');
-  table.innerHTML = `<thead><tr><th>房间号</th><th>状态</th><th>容量</th><th>入住人</th></tr></thead>`;
+  table.innerHTML = `<thead><tr><th>房间号</th><th>状态</th><th>容量</th><th>入住人</th><th>操作</th></tr></thead>`;
   const body = createEl('tbody');
-  state.data.rooms.forEach((room) => {
+  state.data.rooms.forEach((room, index) => {
     const status = ROOM_STATUS[room.status];
     const booking = room.currentBookingId ? state.data.bookings.find((b) => b.id === room.currentBookingId) : null;
     const guest = booking ? state.data.guests.find((g) => g.id === booking.guestId) : null;
     const tr = createEl('tr');
+    const actions = createEl('div', 'table-actions');
+
+    const edit = createEl('button', 'btn btn--outline', '编辑');
+    edit.addEventListener('click', () => {
+      const roomNumber = prompt('房间号', room.roomNumber);
+      if (!roomNumber) return;
+      const floor = Number(prompt('楼层', room.floor) || room.floor);
+      const capacity = Number(prompt('容量', room.capacity) || room.capacity);
+      state.data.rooms[index] = { ...room, roomNumber, floor, capacity };
+      saveData();
+      render();
+    });
+
+    const del = createEl('button', 'btn btn--danger', '删除');
+    del.addEventListener('click', () => {
+      if (!confirm('确认删除该房间？删除后相关预订与打扫记录会丢失。')) return;
+      state.data.rooms.splice(index, 1);
+      state.data.cleaningLogs = state.data.cleaningLogs.filter((log) => log.roomId !== room.id);
+      state.data.bookings = state.data.bookings.filter((b) => b.roomId !== room.id);
+      saveData();
+      render();
+    });
+
+    actions.append(edit, del);
     tr.innerHTML = `<td>${room.roomNumber}</td><td><span class="badge ${status.badge}">${status.label}</span></td><td>${room.capacity} 人</td><td>${guest ? guest.name : '<span class="muted">暂无</span>'}</td>`;
+    const actionTd = createEl('td');
+    actionTd.appendChild(actions);
+    tr.appendChild(actionTd);
     body.appendChild(tr);
   });
   table.appendChild(body);
-  card.appendChild(table);
-  card.append(createEl('div', 'muted', '在列表中点击侧边仪表盘可以快速对房间进行入住、退房、打扫等操作。'));
+  card.append(form, table, createEl('div', 'muted', '在仪表盘的房间卡片中可以进行入住、退房、指派打扫等操作。'));
   return card;
 }
 
 function renderCleaning() {
   const container = createEl('div', 'grid');
   container.style.gap = '14px';
+
+  const createForm = createEl('div', 'card');
+  createForm.append(createEl('h3', 'section-title', '新增打扫任务'));
+  const form = createEl('form', 'form-grid');
+
+  const roomSelect = createEl('select', 'input');
+  roomSelect.required = true;
+  roomSelect.innerHTML = '<option value="">选择房间</option>';
+  state.data.rooms.forEach((room) => {
+    const option = createEl('option');
+    option.value = room.id;
+    option.textContent = `房间 ${room.roomNumber}`;
+    roomSelect.appendChild(option);
+  });
+
+  const staffSelect = createEl('select', 'input');
+  staffSelect.required = true;
+  staffSelect.innerHTML = '<option value="">选择人员</option>';
+  state.data.staff.forEach((staff) => {
+    const option = createEl('option');
+    option.value = staff.id;
+    option.textContent = `${staff.name}（${staff.role}）`;
+    staffSelect.appendChild(option);
+  });
+
+  const submitBtn = createEl('button', 'btn btn--primary', '创建任务');
+  submitBtn.type = 'submit';
+
+  const roomField = createEl('div');
+  roomField.append(createEl('label', 'muted', '房间'), roomSelect);
+  const staffField = createEl('div');
+  staffField.append(createEl('label', 'muted', '人员'), staffSelect);
+
+  form.append(roomField, staffField, submitBtn);
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!roomSelect.value || !staffSelect.value) return;
+    state.data.cleaningLogs.push({
+      id: crypto.randomUUID(),
+      roomId: roomSelect.value,
+      staffId: staffSelect.value,
+      assignedDate: new Date().toISOString(),
+      completedDate: null,
+    });
+    const room = state.data.rooms.find((r) => r.id === roomSelect.value);
+    if (room) room.status = 'cleaning';
+    saveData();
+    render();
+  });
+
+  createForm.append(form);
+  container.appendChild(createForm);
 
   const activeLogs = state.data.cleaningLogs.filter((log) => !log.completedDate);
   const finished = state.data.cleaningLogs.filter((log) => log.completedDate);
@@ -390,7 +569,42 @@ function renderCleaning() {
 
 function renderLinen() {
   const card = createEl('div', 'card');
-  card.append(createEl('h3', 'section-title', '布草库存'));
+  card.append(createEl('h3', 'section-title', '布草管理'));
+
+  const form = createEl('form', 'form-grid');
+  form.innerHTML = `
+    <div>
+      <label class="muted">名称</label>
+      <input class="input" required placeholder="枕套" />
+    </div>
+    <div>
+      <label class="muted">单价</label>
+      <input class="input" type="number" min="0" required value="10" />
+    </div>
+    <div>
+      <label class="muted">状态</label>
+      <select class="input" required>
+        <option value="库存">库存</option>
+        <option value="使用中">使用中</option>
+        <option value="清洗中">清洗中</option>
+      </select>
+    </div>
+    <button class="btn btn--primary" type="submit">新增布草</button>
+  `;
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const [nameInput, priceInput, statusInput] = form.querySelectorAll('input, select');
+    state.data.linens.push({
+      id: crypto.randomUUID(),
+      name: nameInput.value.trim(),
+      price: Number(priceInput.value || 0),
+      status: statusInput.value,
+    });
+    saveData();
+    render();
+  });
+
   const total = state.data.linens.length;
   const inUse = state.data.linens.filter((l) => l.status === '使用中').length;
   const washing = state.data.linens.filter((l) => l.status === '清洗中').length;
@@ -404,49 +618,193 @@ function renderLinen() {
     renderStatCard('清洗中', washing, '后勤', 'badge--danger'),
   );
 
-  const chips = createEl('div', 'chip-list');
-  const sample = state.data.linens.slice(0, 12);
-  sample.forEach((linen) => chips.appendChild(createEl('span', 'chip', `${linen.name} · ￥${linen.price}`)));
+  const table = createEl('table', 'table');
+  table.innerHTML = `<thead><tr><th>名称</th><th>价格</th><th>状态</th><th>操作</th></tr></thead>`;
+  const body = createEl('tbody');
+  state.data.linens.forEach((item, index) => {
+    const tr = createEl('tr');
+    const actions = createEl('div', 'table-actions');
+    const edit = createEl('button', 'btn btn--outline', '编辑');
+    edit.addEventListener('click', () => {
+      const name = prompt('名称', item.name);
+      if (!name) return;
+      const price = Number(prompt('单价', item.price) || item.price);
+      const status = prompt('状态（库存/使用中/清洗中）', item.status) || item.status;
+      state.data.linens[index] = { ...item, name, price, status };
+      saveData();
+      render();
+    });
+    const del = createEl('button', 'btn btn--danger', '删除');
+    del.addEventListener('click', () => {
+      if (!confirm('确认删除该布草记录？')) return;
+      state.data.linens.splice(index, 1);
+      saveData();
+      render();
+    });
+    actions.append(edit, del);
+    tr.innerHTML = `<td>${item.name}</td><td>￥${item.price}</td><td>${item.status}</td>`;
+    const td = createEl('td');
+    td.appendChild(actions);
+    tr.appendChild(td);
+    body.appendChild(tr);
+  });
+  table.appendChild(body);
 
-  card.append(stats, createEl('p', 'muted', '随机展示的布草价格有助于快速估算库存成本。'), chips);
+  card.append(form, stats, table);
   return card;
 }
 
 function renderAssets() {
   const card = createEl('div', 'card');
-  card.append(createEl('h3', 'section-title', '资产清单'));
+  card.append(createEl('h3', 'section-title', '资产管理'));
+
+  const form = createEl('form', 'form-grid');
+  form.innerHTML = `
+    <div>
+      <label class="muted">名称</label>
+      <input required class="input" placeholder="电视" />
+    </div>
+    <div>
+      <label class="muted">类别</label>
+      <input required class="input" placeholder="电子产品" />
+    </div>
+    <div>
+      <label class="muted">位置</label>
+      <input required class="input" placeholder="房间 302" />
+    </div>
+    <div>
+      <label class="muted">购入日期</label>
+      <input required class="input" type="date" value="${new Date().toISOString().slice(0, 10)}" />
+    </div>
+    <div>
+      <label class="muted">估值</label>
+      <input required class="input" type="number" min="0" value="500" />
+    </div>
+    <button class="btn btn--primary" type="submit">新增资产</button>
+  `;
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const [nameInput, categoryInput, locationInput, dateInput, valueInput] = form.querySelectorAll('input');
+    state.data.assets.unshift({
+      id: crypto.randomUUID(),
+      name: nameInput.value.trim(),
+      category: categoryInput.value.trim(),
+      location: locationInput.value.trim(),
+      purchaseDate: dateInput.value,
+      value: Number(valueInput.value || 0),
+    });
+    saveData();
+    render();
+  });
+
   const table = createEl('table', 'table');
-  table.innerHTML = `<thead><tr><th>名称</th><th>类别</th><th>位置</th><th>购入日期</th><th>估值</th></tr></thead>`;
+  table.innerHTML = `<thead><tr><th>名称</th><th>类别</th><th>位置</th><th>购入日期</th><th>估值</th><th>操作</th></tr></thead>`;
   const body = createEl('tbody');
-  state.data.assets.slice(0, 30).forEach((asset) => {
+  state.data.assets.slice(0, 50).forEach((asset, index) => {
     const tr = createEl('tr');
+    const actions = createEl('div', 'table-actions');
+    const edit = createEl('button', 'btn btn--outline', '编辑');
+    edit.addEventListener('click', () => {
+      const name = prompt('名称', asset.name);
+      if (!name) return;
+      const category = prompt('类别', asset.category) || asset.category;
+      const location = prompt('位置', asset.location) || asset.location;
+      const purchaseDate = prompt('购入日期', asset.purchaseDate) || asset.purchaseDate;
+      const value = Number(prompt('估值', asset.value) || asset.value);
+      state.data.assets[index] = { ...asset, name, category, location, purchaseDate, value };
+      saveData();
+      render();
+    });
+    const del = createEl('button', 'btn btn--danger', '删除');
+    del.addEventListener('click', () => {
+      if (!confirm('确认删除该资产记录？')) return;
+      state.data.assets.splice(index, 1);
+      saveData();
+      render();
+    });
+    actions.append(edit, del);
     tr.innerHTML = `<td>${asset.name}</td><td>${asset.category}</td><td>${asset.location}</td><td>${asset.purchaseDate}</td><td>￥${asset.value}</td>`;
+    const td = createEl('td');
+    td.appendChild(actions);
+    tr.appendChild(td);
     body.appendChild(tr);
   });
   table.appendChild(body);
-  card.append(table, createEl('p', 'muted', '列表显示最近的 30 条资产记录。'));
+  card.append(form, table);
   return card;
 }
 
 function renderUsers() {
   const card = createEl('div', 'card');
-  card.append(createEl('h3', 'section-title', '系统用户'));
+  card.append(createEl('h3', 'section-title', '用户管理'));
+
+  const form = createEl('form', 'form-grid');
+  form.innerHTML = `
+    <div>
+      <label class="muted">用户名</label>
+      <input required class="input" placeholder="新用户" />
+    </div>
+    <div>
+      <label class="muted">角色</label>
+      <select class="input">
+        <option value="管理员">管理员</option>
+        <option value="普通用户">普通用户</option>
+      </select>
+    </div>
+    <button class="btn btn--primary" type="submit">新增用户</button>
+  `;
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const [nameInput, roleInput] = form.querySelectorAll('input, select');
+    state.data.users.push({ id: crypto.randomUUID(), username: nameInput.value.trim(), role: roleInput.value });
+    saveData();
+    render();
+  });
+
   const list = createEl('div', 'grid');
   list.style.gridTemplateColumns = 'repeat(auto-fit, minmax(220px, 1fr))';
-  state.data.users.forEach((user) => {
+  state.data.users.forEach((user, index) => {
     const box = createEl('div', 'room-card');
     box.style.borderLeftColor = user.role === '管理员' ? '#4f46e5' : '#0ea5e9';
     box.innerHTML = `<div class="room-card__title"><span>${user.username}</span><span class="badge ${user.role === '管理员' ? 'badge--danger' : 'badge--info'}">${user.role}</span></div>`;
-    box.appendChild(createEl('div', 'muted', '示例账号，不需要密码即可登录。'));
+    box.appendChild(createEl('div', 'muted', '登录密码统一为 h123')); 
+
+    const actions = createEl('div', 'room-card__actions');
+    const edit = createEl('button', 'btn btn--outline', '编辑');
+    edit.addEventListener('click', () => {
+      const username = prompt('用户名', user.username);
+      if (!username) return;
+      const role = prompt('角色（管理员/普通用户）', user.role) || user.role;
+      state.data.users[index] = { ...user, username, role };
+      if (state.currentUser && state.currentUser.id === user.id) {
+        state.currentUser = state.data.users[index];
+      }
+      saveData();
+      render();
+    });
+
+    const del = createEl('button', 'btn btn--danger', '删除');
+    del.addEventListener('click', () => {
+      if (!confirm('确认删除该用户？')) return;
+      state.data.users.splice(index, 1);
+      if (state.currentUser && state.currentUser.id === user.id) {
+        state.currentUser = null;
+      }
+      saveData();
+      render();
+    });
+    actions.append(edit, del);
+    box.appendChild(actions);
     list.appendChild(box);
   });
-  card.appendChild(list);
+  card.append(form, list);
   return card;
 }
 
 function renderSystem() {
   const card = createEl('div', 'card');
-  card.append(createEl('h3', 'section-title', '系统维护')); 
+  card.append(createEl('h3', 'section-title', '系统维护'));
   const row = createEl('div', 'actions-row');
   const resetBtn = createEl('button', 'btn btn--primary', '重置示例数据');
   const exportBtn = createEl('button', 'btn btn--outline', '导出当前数据');
@@ -454,9 +812,8 @@ function renderSystem() {
   resetBtn.addEventListener('click', resetData);
   exportBtn.addEventListener('click', exportData);
   clearBtn.addEventListener('click', () => {
-    localStorage.removeItem(STORAGE_KEY);
-    state.data = generateSampleData();
-    render();
+    if (!confirm('确认清空除用户以外的业务数据？')) return;
+    clearBusinessData();
   });
   row.append(resetBtn, exportBtn, clearBtn);
   card.append(row, createEl('p', 'muted', '所有数据都存储在浏览器本地，无需后端服务。'));
@@ -515,7 +872,7 @@ function renderAppShell() {
 function renderLogin() {
   const container = createEl('div', 'login');
   const panel = createEl('div', 'login__panel');
-  panel.innerHTML = `<div class="logo" style="margin-bottom:8px">H</div><h1>酒店管理系统</h1><p class="muted">选择一个示例账号即可进入系统，完全由浏览器本地驱动。</p>`;
+  panel.innerHTML = `<div class="logo" style="margin-bottom:8px">H</div><h1>酒店管理系统</h1><p class="muted">选择账号并输入密码（默认 h123）即可进入系统，完全由浏览器本地驱动。</p>`;
 
   const select = createEl('select', 'select');
   state.data.users.forEach((user) => {
@@ -525,18 +882,25 @@ function renderLogin() {
     select.appendChild(option);
   });
 
+  const password = createEl('input', 'input');
+  password.type = 'password';
+  password.placeholder = '请输入密码 h123';
+  password.style.marginTop = '10px';
+
   const loginBtn = createEl('button', 'btn btn--primary', '立即登录');
   loginBtn.style.width = '100%';
   loginBtn.style.marginTop = '12px';
   loginBtn.addEventListener('click', () => {
     const user = state.data.users.find((u) => u.id === select.value);
+    if (!password.value) return alert('请输入密码');
+    if (password.value !== LOGIN_PASSWORD) return alert('密码不正确，默认密码为 h123');
     if (user) {
       state.currentUser = user;
       render();
     }
   });
 
-  panel.append(select, loginBtn);
+  panel.append(select, password, loginBtn);
   container.appendChild(panel);
   return container;
 }
