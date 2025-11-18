@@ -317,6 +317,26 @@ button {
   margin-top: 12px;
 }
 
+.form-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.form-grid label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.table-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .chip-list {
   display: flex;
   gap: 8px;
